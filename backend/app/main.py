@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -135,6 +136,22 @@ def resolve_escalation(run_id: str, escalation_id: str, request: ResolutionReque
             raise HTTPException(409, "This escalation has already been resolved.")
         status = "approved" if request.action in {"approve", "edit"} else "excluded"
         resolution = {"action": request.action, "note": request.note, "actor": request.actor, "resolved_at": now()}
+        if request.action == "edit" and escalation["record_key"] != "source-column":
+            record = connection.execute("SELECT * FROM records WHERE run_id = ? AND source_key = ?", (run_id, escalation["record_key"])).fetchone()
+            if not record:
+                raise HTTPException(404, "The record for this escalation no longer exists.")
+            payload = load_json(record["payload"])
+            if escalation["kind"] == "ambiguous_date":
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", request.note):
+                    raise HTTPException(422, "For a date correction, enter an ISO date such as 2021-04-03.")
+                payload["joined_on"] = request.note
+            elif escalation["kind"] == "validation_failure":
+                field = load_json(escalation["evidence"]).get("target_field")
+                if field == "email" and "@" not in request.note:
+                    raise HTTPException(422, "For an email correction, enter a valid email address.")
+                if field:
+                    payload[field] = request.note
+            connection.execute("UPDATE records SET payload = ? WHERE id = ?", (json_value(payload), record["id"]))
         connection.execute("UPDATE escalations SET status = ?, resolution = ? WHERE id = ?", (status, json_value(resolution), escalation_id))
         if escalation["record_key"] != "source-column":
             record_status = "excluded" if status == "excluded" else "ready"
@@ -155,7 +172,7 @@ def deliver_run(run_id: str) -> dict[str, Any]:
         records = connection.execute("SELECT * FROM records WHERE run_id = ? AND status = 'ready' ORDER BY source_key", (run_id,)).fetchall()
         accepted = retried = 0
         for index, record in enumerate(records):
-            attempts = 2 if index == 2 else 1
+            attempts = 2 if index == 0 else 1
             response = {"status": 201, "message": "upsert accepted"}
             if attempts == 2:
                 response["retry"] = {"status": 429, "message": "rate limited; accepted on retry"}
