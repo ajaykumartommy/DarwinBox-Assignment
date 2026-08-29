@@ -233,7 +233,7 @@ export default function Home() {
           {view === 'mapping' && <Mapping onNotice={setNotice} />}
           {view === 'escalations' && <EscalationQueue items={escalations} onResolve={resolveEscalation} resolved={resolvedCount} />}
           {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} />}
-          {view === 'audit' && <Audit items={escalations} events={auditEvents} delivered={pushState === 'complete'} />}
+          {view === 'audit' && <Audit items={escalations} events={auditEvents} />}
         </div>
       </div>
     </main>
@@ -276,7 +276,7 @@ function Delivery({ ready, state, onPush }: { ready: boolean; state: string; onP
   return <><SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} /><Card className="delivery-hero"><div className="delivery-status"><span className={`delivery-orb ${delivered ? 'success' : ''}`}>{delivered ? '✓' : '↑'}</span><div><h2>{delivered ? '24 employee records delivered' : ready ? 'Your payload is ready' : 'Review decisions are still required'}</h2><p>{delivered ? '23 records were accepted immediately. A simulated rate-limit response was retried and then accepted.' : ready ? 'All records passed target-schema validation. Use the controlled push below to send them to the mock target.' : 'The system prevents delivery while any record has an unresolved ambiguity.'}</p></div></div><div className="delivery-metrics"><div><b>{delivered ? '24' : '24'}</b><span>validated payloads</span></div><div><b>{delivered ? '1' : '0'}</b><span>retried requests</span></div><div><b>0</b><span>silent failures</span></div></div><button className="primary-wide" onClick={onPush} disabled={state === 'sending'}>{state === 'sending' ? 'Sending to target…' : delivered ? 'Re-run delivery simulation' : 'Push validated records to target'} <span>→</span></button></Card><Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card></>;
 }
 
-function Audit({ items, events, delivered }: { items: Escalation[]; events: ApiAuditEvent[]; delivered: boolean }) {
+function Audit({ items, events }: { items: Escalation[]; events: ApiAuditEvent[] }) {
   const [filter, setFilter] = useState<'all' | 'agent' | 'human' | 'target'>('all');
   const agentEvents = events.filter(event => event.actor !== 'Alex Singh').map(event => ({ time: new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), type: event.event_type, detail: event.detail, review: event.event_type === 'Escalated' }));
   const humanEvents = items.filter(x => x.resolution !== 'open').map(item => ({ time: '09:45', type: 'Human decision', detail: `${item.resolution === 'approved' ? 'Approved' : 'Excluded'}: ${item.title}`, review: false }));
