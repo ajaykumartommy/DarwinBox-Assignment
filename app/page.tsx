@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { createDemoMigration, deliverMigration, resolveMigrationEscalation, uploadMigration } from '../lib/api';
+import type { ApiAuditEvent } from '../lib/api';
 
 type View = 'overview' | 'dataset' | 'mapping' | 'escalations' | 'delivery' | 'audit';
 type Resolution = 'open' | 'approved' | 'rejected';
@@ -118,6 +119,7 @@ export default function Home() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [runId, setRunId] = useState<string | null>(null);
   const [serverMetrics, setServerMetrics] = useState<{ source_records: number; ready_records: number } | null>(null);
+  const [auditEvents, setAuditEvents] = useState<ApiAuditEvent[]>([]);
 
   const openEscalations = escalations.filter((item) => item.resolution === 'open');
   const resolvedCount = escalations.length - openEscalations.length;
@@ -132,9 +134,10 @@ export default function Home() {
     return `${openEscalations.length} decisions need review before delivery.`;
   }, [pushState, readyForPush, openEscalations.length]);
 
-  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
+  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; events: ApiAuditEvent[]; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
     setRunId(serverRun.id);
     setServerMetrics(serverRun.metrics);
+    setAuditEvents(serverRun.events);
     setEscalations(serverRun.escalations.map((item) => ({ id: item.id, title: item.title, detail: item.detail, record: item.record_key, confidence: item.confidence, resolution: item.status === 'open' ? 'open' : item.status === 'approved' ? 'approved' : 'rejected' })));
   }
 
@@ -182,6 +185,7 @@ export default function Home() {
     try {
       if (!runId) throw new Error('Run the server-side analysis before delivering data.');
       const result = await deliverMigration(runId);
+      applyServerRun(result);
       setPushState('complete');
       setNotice(`Delivery complete. ${result.deliveries.filter((item: { attempts: number }) => item.attempts > 1).length} transient target error was retried successfully.`);
     } catch (error) {
@@ -229,7 +233,7 @@ export default function Home() {
           {view === 'mapping' && <Mapping onNotice={setNotice} />}
           {view === 'escalations' && <EscalationQueue items={escalations} onResolve={resolveEscalation} resolved={resolvedCount} />}
           {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} />}
-          {view === 'audit' && <Audit items={escalations} delivered={pushState === 'complete'} />}
+          {view === 'audit' && <Audit items={escalations} events={auditEvents} delivered={pushState === 'complete'} />}
         </div>
       </div>
     </main>
@@ -272,11 +276,11 @@ function Delivery({ ready, state, onPush }: { ready: boolean; state: string; onP
   return <><SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} /><Card className="delivery-hero"><div className="delivery-status"><span className={`delivery-orb ${delivered ? 'success' : ''}`}>{delivered ? '✓' : '↑'}</span><div><h2>{delivered ? '24 employee records delivered' : ready ? 'Your payload is ready' : 'Review decisions are still required'}</h2><p>{delivered ? '23 records were accepted immediately. A simulated rate-limit response was retried and then accepted.' : ready ? 'All records passed target-schema validation. Use the controlled push below to send them to the mock target.' : 'The system prevents delivery while any record has an unresolved ambiguity.'}</p></div></div><div className="delivery-metrics"><div><b>{delivered ? '24' : '24'}</b><span>validated payloads</span></div><div><b>{delivered ? '1' : '0'}</b><span>retried requests</span></div><div><b>0</b><span>silent failures</span></div></div><button className="primary-wide" onClick={onPush} disabled={state === 'sending'}>{state === 'sending' ? 'Sending to target…' : delivered ? 'Re-run delivery simulation' : 'Push validated records to target'} <span>→</span></button></Card><Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card></>;
 }
 
-function Audit({ items, delivered }: { items: Escalation[]; delivered: boolean }) {
+function Audit({ items, events, delivered }: { items: Escalation[]; events: ApiAuditEvent[]; delivered: boolean }) {
   const [filter, setFilter] = useState<'all' | 'agent' | 'human' | 'target'>('all');
-  const agentEvents = activities.map(([time, type, detail], index) => ({ time, type, detail, review: index === 5 }));
+  const agentEvents = events.filter(event => event.actor !== 'Alex Singh').map(event => ({ time: new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), type: event.event_type, detail: event.detail, review: event.event_type === 'Escalated' }));
   const humanEvents = items.filter(x => x.resolution !== 'open').map(item => ({ time: '09:45', type: 'Human decision', detail: `${item.resolution === 'approved' ? 'Approved' : 'Excluded'}: ${item.title}`, review: false }));
-  const targetEvents = delivered ? [{ time: '09:46', type: 'Target response', detail: 'Mock target accepted validated records; one transient response retried successfully.', review: false }] : [];
+  const targetEvents = events.filter(event => event.event_type === 'Delivered' || event.event_type === 'Rollback').map(event => ({ time: new Date(event.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), type: 'Target response', detail: event.detail, review: false }));
   const visible = filter === 'agent' ? agentEvents : filter === 'human' ? humanEvents : filter === 'target' ? targetEvents : [...agentEvents, ...humanEvents, ...targetEvents];
   return <><SectionTitle eyebrow="AUDIT TRAIL" title="A narrative of every meaningful decision" body="This is the handoff artifact for the implementation team: clear enough to trust, detailed enough to investigate." action={<button className="secondary-button" onClick={() => downloadJson('migration-audit.json', { agentEvents, humanEvents, targetEvents })}>Export audit log</button>} /><Card className="audit-card"><div className="audit-filters">{([['all', 'All activity'], ['agent', 'Agent actions'], ['human', 'Human decisions'], ['target', 'Target responses']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'filter-active' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div><div className="audit-timeline">{visible.length ? visible.map((event, index) => <div className="audit-event" key={`${event.time}-${event.type}-${index}`}><time>Today · {event.time}</time><span className={`timeline-mark ${event.review ? 'review' : event.type === 'Human decision' ? 'human' : ''}`}>{event.review ? '!' : event.type === 'Human decision' ? '◉' : '✓'}</span><div><Badge tone={event.type === 'Human decision' ? 'blue' : event.review ? 'warning' : 'good'}>{event.type}</Badge><h3>{event.detail}</h3><p>{event.review ? 'The agent paused because evidence supported more than one valid interpretation.' : event.type === 'Human decision' ? 'Reviewer action is retained with the original evidence and confidence.' : 'Recorded as an auditable system event.'}</p></div></div>) : <div className="empty-state"><span>•</span><b>No events in this view yet</b><p>Run analysis or complete delivery to add an event.</p></div>}</div></Card></>;
 }
