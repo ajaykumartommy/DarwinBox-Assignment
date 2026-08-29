@@ -11,6 +11,7 @@ from typing import Any, List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 from .db import Database, json_value, load_json
 from .migration import Escalation, parse_source, process_rows
@@ -18,6 +19,7 @@ from .advisor import review_migration
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / "backend" / ".env")
 DATABASE_PATH = Path(os.getenv("MIGRATION_DB_PATH", PROJECT_ROOT / "backend" / "data" / "migration.db"))
 db = Database(DATABASE_PATH)
 

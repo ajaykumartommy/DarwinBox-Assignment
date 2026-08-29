@@ -60,8 +60,9 @@ for a production UI build.
 ### Optional OpenAI advisor
 
 The safety-critical processing path is deterministic by design. To add an
-OpenAI advisory reviewer, set `OPENAI_API_KEY` before starting the API. Optionally
-set `OPENAI_MODEL`; otherwise the app uses `gpt-4.1-mini`. The advisor reviews
+OpenAI advisory reviewer, add `OPENAI_API_KEY=...` to `backend/.env` (or set it
+in the shell) before starting the API. Optionally set `OPENAI_MODEL`; otherwise
+the app uses `gpt-4.1-mini`. The advisor reviews
 the proposed mappings and escalation boundary; it never writes target records
 or overrides validation rules. Its outcome is recorded in the run audit trail.
 
