@@ -20,7 +20,7 @@ export const uploadMigration = (files: File[]) => {
   return request<RunSnapshot>('/api/runs/upload', { method: 'POST', body: data });
 };
 
-export const resolveMigrationEscalation = (runId: string, escalationId: string, action: 'approve' | 'exclude') =>
-  request<RunSnapshot>(`/api/runs/${runId}/escalations/${escalationId}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, actor: 'Alex Singh' }) });
+export const resolveMigrationEscalation = (runId: string, escalationId: string, action: 'approve' | 'exclude' | 'edit', note = '') =>
+  request<RunSnapshot>(`/api/runs/${runId}/escalations/${escalationId}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, note, actor: 'Alex Singh' }) });
 
 export const deliverMigration = (runId: string) => request<RunSnapshot>(`/api/runs/${runId}/deliver`, { method: 'POST' });
