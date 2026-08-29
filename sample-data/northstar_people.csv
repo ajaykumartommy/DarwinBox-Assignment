@@ -1,4 +1,4 @@
-employee_id,first_name,last_name,work_email,start_date,department,phone
-EMP-1042,Aisha,Patel,Aisha.Patel@Northstar.example,14/03/2022,People,+1 (415) 555-0122
-EMP-1047,Marcus,Chen,marcus.chen@northstar.example,2021-10-08,Engineering,415 555 0128
-EMP-1051,Nora,Williams,nora.williams@northstar.example,2022-06-21,Finance,+14155550141
+employee_id,first_name,last_name,work_email,start_date,department,phone,Location
+EMP-1042,Aisha,Patel,Aisha.Patel@Northstar.example,14/03/2022,People,+1 (415) 555-0122,Bengaluru
+EMP-1047,Marcus,Chen,marcus.chen@northstar.example,03/04/2021,Engineering,415 555 0128,Singapore
+EMP-1051,Nora,Williams,nora.williams@northstar.example,2022-06-21,Finance,+14155550141,London

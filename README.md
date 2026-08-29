@@ -21,18 +21,41 @@ The prototype runs locally and uses realistic seeded migration data so the happy
 1. Open **Migration run** and frame the autonomy boundary in the "What the agent handled" card.
 2. Open **Source data** to show the two source exports consolidated into canonical records.
 3. Open **Field mapping** to explain that every inferred mapping has visible evidence and confidence.
-4. Open **Review queue**. Approve one recommendation and exclude another to demonstrate human control and auditability.
-5. Complete the remaining decision, return to **Target delivery**, and push to the mock API.
+4. Open **Review queue**. Approve, exclude, or edit the seeded ambiguous date, location, duplicate-conflict, and missing-required-value cases to demonstrate human control and auditability.
+5. Complete the decisions, return to **Target delivery**, and push to the mock API.
 6. End in **Audit trail**, where automated work and human judgments are recorded together.
 
 ## Local development
+
+The application has two local services. The React UI calls the FastAPI service
+at `http://localhost:8000`; CORS is restricted to the local UI origins.
+
+In one terminal, create an isolated Python environment and start the API:
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+PYTHONPATH=. .venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+In a second terminal, start the UI:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Then open the URL printed by the development server. Use `npm run build` for a production build.
+Then open the URL printed by the development server and select **Run analysis**.
+It creates a persisted demo run using the sample source files. Uploading CSV or
+XLSX source files uses the same API pipeline; an optional JSON target schema is
+supported by the API (`POST /api/runs/upload`), and the built-in employee schema
+is used when one is not supplied from the UI.
+
+The API exposes `GET /health`, run retrieval, escalation resolution, controlled
+delivery, and explicit rollback endpoints. FastAPI also provides interactive API
+documentation at `http://localhost:8000/docs` while running. Use `npm run build`
+for a production UI build.
 
 ## What I would build next
 

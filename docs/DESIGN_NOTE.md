@@ -15,3 +15,7 @@ The agent must pause where a reasonable person could make more than one valid ch
 ## Delivery and trust
 
 The mock target client models idempotent upsert behavior and a transient error that succeeds on a single retry. A production version would persist tenant-scoped run state, raw-file fingerprints, original and transformed values, reviewer identity, and each target response. It would also replace the seeded fixtures with CSV/XLSX parsers, target-schema upload, a real connector, role-based approvals, and explicit rollback where the target supports it.
+
+## Prototype implementation
+
+This submission includes a FastAPI and SQLite backend rather than only a UI simulation. It persists runs, canonical records, field mappings, escalations, reviewer actions, event history, and mock delivery responses. It accepts CSV/XLSX uploads, supports an optional target-schema JSON upload, blocks delivery while escalations are open, retries a deterministic transient target failure, and exposes an explicit rollback endpoint. The UI uses those API endpoints for its run, review, and delivery actions.

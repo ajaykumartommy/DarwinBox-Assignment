@@ -37,3 +37,9 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# local backend runtime
+/backend/.venv/
+/backend/data/
+__pycache__/
+*.py[cod]

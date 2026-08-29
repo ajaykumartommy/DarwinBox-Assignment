@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
-import { deliverToMockTarget } from '../lib/mock-target';
+import { createDemoMigration, deliverMigration, resolveMigrationEscalation, uploadMigration } from '../lib/api';
 
 type View = 'overview' | 'dataset' | 'mapping' | 'escalations' | 'delivery' | 'audit';
 type Resolution = 'open' | 'approved' | 'rejected';
@@ -105,11 +105,15 @@ export default function Home() {
   const [pushState, setPushState] = useState<'idle' | 'sending' | 'complete'>('idle');
   const [notice, setNotice] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [serverMetrics, setServerMetrics] = useState<{ source_records: number; ready_records: number } | null>(null);
 
   const openEscalations = escalations.filter((item) => item.resolution === 'open');
   const resolvedCount = escalations.length - openEscalations.length;
   const readyForPush = openEscalations.length === 0;
-  const recordsReady = 24 - openEscalations.length;
+  const recordsReady = serverMetrics?.ready_records ?? 24 - openEscalations.length;
+  const sourceRecords = serverMetrics?.source_records ?? 42;
   const stage = runState === 'complete' ? 4 : runState === 'running' ? 3 : 3;
 
   const summary = useMemo(() => {
@@ -118,13 +122,32 @@ export default function Home() {
     return `${openEscalations.length} decisions need review before delivery.`;
   }, [pushState, readyForPush, openEscalations.length]);
 
-  function beginRun() {
-    setRunState('running');
-    setNotice('Migration analysis is complete. Safe transformations were applied automatically.');
-    window.setTimeout(() => setRunState('complete'), 650);
+  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
+    setRunId(serverRun.id);
+    setServerMetrics(serverRun.metrics);
+    setEscalations(serverRun.escalations.map((item) => ({ id: item.id, title: item.title, detail: item.detail, record: item.record_key, confidence: item.confidence, resolution: item.status === 'open' ? 'open' : item.status === 'approved' ? 'approved' : 'rejected' })));
   }
 
-  function resolveEscalation(id: string, resolution: Exclude<Resolution, 'open'>) {
+  async function beginRun() {
+    setRunState('running');
+    try {
+      const serverRun = selectedFiles.length ? await uploadMigration(selectedFiles) : await createDemoMigration();
+      applyServerRun(serverRun);
+      setRunState('complete');
+      setNotice(`Server-side analysis completed for ${serverRun.metrics.source_records} records. Safe transformations were applied automatically.`);
+    } catch (error) {
+      setRunState('ready');
+      setNotice(error instanceof Error ? error.message : 'Could not reach the migration API. Start the backend and try again.');
+    }
+  }
+
+  async function resolveEscalation(id: string, resolution: Exclude<Resolution, 'open'>) {
+    try {
+      if (runId) applyServerRun(await resolveMigrationEscalation(runId, id, resolution === 'approved' ? 'approve' : 'exclude'));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not save that decision.');
+      return;
+    }
     setEscalations((current) => current.map((item) => item.id === id ? { ...item, resolution } : item));
     setNotice(resolution === 'approved' ? 'Decision applied and recorded in the audit trail.' : 'Record excluded from this migration and recorded in the audit trail.');
   }
@@ -133,6 +156,7 @@ export default function Home() {
     const names = Array.from(event.target.files ?? []).map((file) => file.name);
     if (names.length) {
       setUploadedFiles(names);
+      setSelectedFiles(Array.from(event.target.files ?? []));
       setNotice(`${names.length} source file${names.length > 1 ? 's' : ''} added. The demo dataset remains available for a guided walkthrough.`);
     }
   }
@@ -145,9 +169,15 @@ export default function Home() {
     }
     setPushState('sending');
     setNotice('Sending validated records to the target API…');
-    const outcome = await deliverToMockTarget(Array.from({ length: 24 }, (_, index) => `EMP-${1042 + index}`));
-    setPushState('complete');
-    setNotice(`Delivery complete. ${outcome.retried} transient target error was retried successfully.`);
+    try {
+      if (!runId) throw new Error('Run the server-side analysis before delivering data.');
+      const result = await deliverMigration(runId);
+      setPushState('complete');
+      setNotice(`Delivery complete. ${result.deliveries.filter((item: { attempts: number }) => item.attempts > 1).length} transient target error was retried successfully.`);
+    } catch (error) {
+      setPushState('idle');
+      setNotice(error instanceof Error ? error.message : 'Could not deliver the records.');
+    }
   }
 
   return (
@@ -178,8 +208,8 @@ export default function Home() {
 
         <div className="content">
           {notice && <div className="notice" role="status"><span>✓</span>{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}>×</button></div>}
-          {view === 'overview' && <Overview stage={stage} recordsReady={recordsReady} openEscalations={openEscalations} runState={runState} pushState={pushState} summary={summary} onBegin={beginRun} onNavigate={setView} onPush={pushToTarget} />}
-          {view === 'dataset' && <Dataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} />}
+          {view === 'overview' && <Overview stage={stage} sourceRecords={sourceRecords} recordsReady={recordsReady} openEscalations={openEscalations} runState={runState} pushState={pushState} summary={summary} onBegin={beginRun} onNavigate={setView} onPush={pushToTarget} />}
+          {view === 'dataset' && <Dataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} sourceRecords={sourceRecords} />}
           {view === 'mapping' && <Mapping />}
           {view === 'escalations' && <EscalationQueue items={escalations} onResolve={resolveEscalation} resolved={resolvedCount} />}
           {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} />}
@@ -190,7 +220,7 @@ export default function Home() {
   );
 }
 
-function Overview({ stage, recordsReady, openEscalations, runState, pushState, summary, onBegin, onNavigate, onPush }: { stage: number; recordsReady: number; openEscalations: Escalation[]; runState: string; pushState: string; summary: string; onBegin: () => void; onNavigate: (view: View) => void; onPush: () => void }) {
+function Overview({ stage, sourceRecords, recordsReady, openEscalations, runState, pushState, summary, onBegin, onNavigate, onPush }: { stage: number; sourceRecords: number; recordsReady: number; openEscalations: Escalation[]; runState: string; pushState: string; summary: string; onBegin: () => void; onNavigate: (view: View) => void; onPush: () => void }) {
   return <>
     <SectionTitle eyebrow="EMPLOYEE MIGRATION · RUN #042" title="Migration command center" body="A supervised path from messy source exports to a validated target payload." action={<div className="header-actions"><Badge tone="good"><span className="pulse" />Agent ready</Badge><button className="primary-button" onClick={onBegin}>{runState === 'complete' ? 'Re-run analysis' : 'Run analysis'} <span>→</span></button></div>} />
     <Card className="run-card">
@@ -198,7 +228,7 @@ function Overview({ stage, recordsReady, openEscalations, runState, pushState, s
       <div className="progress-rail">
         {['Ingested', 'Standardized', 'Validated', 'Delivered'].map((label, index) => <div className="rail-step" key={label}><div className={`rail-dot ${index < stage ? 'done' : ''}`}>{index < stage ? '✓' : index + 1}</div><span>{label}</span>{index < 3 && <div className={`rail-line ${index < stage - 1 ? 'done' : ''}`} />}</div>)}
       </div>
-      <div className="run-stats"><div><b>42</b><span>source records</span></div><div><b>{recordsReady}</b><span>ready for target</span></div><div><b>4</b><span>duplicates consolidated</span></div><div><b className={openEscalations.length ? 'amber-text' : 'green-text'}>{openEscalations.length}</b><span>awaiting decisions</span></div></div>
+      <div className="run-stats"><div><b>{sourceRecords}</b><span>source records</span></div><div><b>{recordsReady}</b><span>ready for target</span></div><div><b>4</b><span>duplicates consolidated</span></div><div><b className={openEscalations.length ? 'amber-text' : 'green-text'}>{openEscalations.length}</b><span>awaiting decisions</span></div></div>
     </Card>
     <div className="grid-two overview-grid">
       <Card><div className="card-heading"><div><p className="eyebrow">AUTONOMY REPORT</p><h2>What the agent handled</h2></div><button className="text-button" onClick={() => onNavigate('audit')}>View audit →</button></div><div className="handled-list"><div><span className="check">✓</span><div><b>Matched 11 source fields</b><p>Using header, value-format, and semantic evidence.</p></div><Badge tone="good">Safe</Badge></div><div><span className="check">✓</span><div><b>Standardized inconsistent data</b><p>Dates, phone formats, whitespace, and casing normalized.</p></div><Badge tone="good">Safe</Badge></div><div><span className="check">✓</span><div><b>Consolidated 4 duplicate records</b><p>Exact employee IDs with non-conflicting values only.</p></div><Badge tone="good">Safe</Badge></div></div><div className="boundary-note"><span>⌁</span><p><b>Autonomy boundary:</b> the agent only proceeds when evidence is strong and transformations are reversible. Ambiguity stays visible for review.</p></div></Card>
@@ -208,8 +238,8 @@ function Overview({ stage, recordsReady, openEscalations, runState, pushState, s
   </>;
 }
 
-function Dataset({ files, onFiles, recordsReady }: { files: string[]; onFiles: (event: ChangeEvent<HTMLInputElement>) => void; recordsReady: number }) {
-  return <><SectionTitle eyebrow="SOURCE DATA" title="A unified employee dataset" body="The agent reconciles multiple exports into one reviewable source of truth." action={<label className="primary-button upload-label">Add source files <input aria-label="Add source files" type="file" multiple accept=".csv,.xlsx,.xls" onChange={onFiles} /></label>} /><div className="grid-two dataset-summary"><Card><p className="eyebrow">INGESTION</p><h2>{files.length ? `${files.length} newly selected file${files.length > 1 ? 's' : ''}` : '2 source files connected'}</h2><div className="file-list">{(files.length ? files : ['northstar_people.csv', 'benefits_export.xlsx']).map((file, index) => <div key={file}><span className="file-icon">{file.endsWith('csv') ? 'CSV' : 'XLS'}</span><div><b>{file}</b><small>{index === 0 ? '24 records · 12 columns' : '18 records · 9 columns'}</small></div><Badge tone="good">Profiled</Badge></div>)}</div></Card><Card><p className="eyebrow">QUALITY SNAPSHOT</p><h2>Records are being treated conservatively</h2><div className="quality-bars"><div><span>Ready for target</span><b>{recordsReady} / 24</b><i><em style={{ width: `${(recordsReady / 24) * 100}%` }} /></i></div><div><span>Needs review</span><b>{24 - recordsReady} / 24</b><i className="amber"><em style={{ width: `${((24 - recordsReady) / 24) * 100}%` }} /></i></div></div><p className="small-note">No records are silently discarded. Exclusions require a human decision and leave an audit entry.</p></Card></div><Card className="data-table-card"><div className="card-heading"><div><p className="eyebrow">CANONICAL RECORDS</p><h2>Employee preview</h2></div><Badge tone="neutral">24 records</Badge></div><div className="table-wrap"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Target status</th><th>Agent note</th></tr></thead><tbody>{records.map(row => <tr key={row.id}><td><span className="person-initial">{row.name.split(' ').map(x => x[0]).join('')}</span><b>{row.name}</b></td><td>{row.id}</td><td><Badge tone={row.state === 'Ready' ? 'good' : 'warning'}>{row.state}</Badge></td><td>{row.note}</td></tr>)}</tbody></table></div></Card></>;
+function Dataset({ files, onFiles, recordsReady, sourceRecords }: { files: string[]; onFiles: (event: ChangeEvent<HTMLInputElement>) => void; recordsReady: number; sourceRecords: number }) {
+  return <><SectionTitle eyebrow="SOURCE DATA" title="A unified employee dataset" body="The agent reconciles multiple exports into one reviewable source of truth." action={<label className="primary-button upload-label">Add source files <input aria-label="Add source files" type="file" multiple accept=".csv,.xlsx,.xls" onChange={onFiles} /></label>} /><div className="grid-two dataset-summary"><Card><p className="eyebrow">INGESTION</p><h2>{files.length ? `${files.length} newly selected file${files.length > 1 ? 's' : ''}` : '2 source files connected'}</h2><div className="file-list">{(files.length ? files : ['northstar_people.csv', 'benefits_export.xlsx']).map((file, index) => <div key={file}><span className="file-icon">{file.endsWith('csv') ? 'CSV' : 'XLS'}</span><div><b>{file}</b><small>{index === 0 ? '24 records · 12 columns' : '18 records · 9 columns'}</small></div><Badge tone="good">Profiled</Badge></div>)}</div></Card><Card><p className="eyebrow">QUALITY SNAPSHOT</p><h2>Records are being treated conservatively</h2><div className="quality-bars"><div><span>Ready for target</span><b>{recordsReady} / {sourceRecords}</b><i><em style={{ width: `${(recordsReady / sourceRecords) * 100}%` }} /></i></div><div><span>Needs review</span><b>{sourceRecords - recordsReady} / {sourceRecords}</b><i className="amber"><em style={{ width: `${((sourceRecords - recordsReady) / sourceRecords) * 100}%` }} /></i></div></div><p className="small-note">No records are silently discarded. Exclusions require a human decision and leave an audit entry.</p></Card></div><Card className="data-table-card"><div className="card-heading"><div><p className="eyebrow">CANONICAL RECORDS</p><h2>Employee preview</h2></div><Badge tone="neutral">{sourceRecords} records</Badge></div><div className="table-wrap"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Target status</th><th>Agent note</th></tr></thead><tbody>{records.map(row => <tr key={row.id}><td><span className="person-initial">{row.name.split(' ').map(x => x[0]).join('')}</span><b>{row.name}</b></td><td>{row.id}</td><td><Badge tone={row.state === 'Ready' ? 'good' : 'warning'}>{row.state}</Badge></td><td>{row.note}</td></tr>)}</tbody></table></div></Card></>;
 }
 
 function Mapping() {
