@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
-import { createDemoMigration, deliverMigration, resolveMigrationEscalation, uploadMigration } from '../lib/api';
-import type { ApiAuditEvent } from '../lib/api';
+import { createDemoMigration, deliverMigration, resolveMigrationEscalation, rollbackMigration, uploadMigration } from '../lib/api';
+import type { ApiAuditEvent, ApiMapping, ApiRecord } from '../lib/api';
 
 type View = 'overview' | 'dataset' | 'mapping' | 'escalations' | 'delivery' | 'audit';
 type Resolution = 'open' | 'approved' | 'rejected';
@@ -35,7 +35,7 @@ const activities = [
   ['09:42:25', 'Escalated', '3 cases need a human decision'],
 ];
 
-const mappings = [
+const mappings: Array<[string, string, string, string]> = [
   ['employee_id', 'employeeNumber', 'Exact header match', '100%'],
   ['first_name', 'given_name', 'Semantic + value profile', '98%'],
   ['last_name', 'family_name', 'Semantic + value profile', '97%'],
@@ -120,6 +120,8 @@ export default function Home() {
   const [runId, setRunId] = useState<string | null>(null);
   const [serverMetrics, setServerMetrics] = useState<{ source_records: number; ready_records: number } | null>(null);
   const [auditEvents, setAuditEvents] = useState<ApiAuditEvent[]>([]);
+  const [apiRecords, setApiRecords] = useState<ApiRecord[]>([]);
+  const [apiMappings, setApiMappings] = useState<ApiMapping[]>([]);
 
   const openEscalations = escalations.filter((item) => item.resolution === 'open');
   const resolvedCount = escalations.length - openEscalations.length;
@@ -129,15 +131,17 @@ export default function Home() {
   const stage = runState === 'complete' ? 4 : runState === 'running' ? 3 : 3;
 
   const summary = useMemo(() => {
-    if (pushState === 'complete') return '24 records delivered · 1 retried successfully';
+    if (pushState === 'complete') return 'Validated records delivered · 1 transient target response retried successfully';
     if (readyForPush) return 'All review decisions are complete. Ready to deliver.';
     return `${openEscalations.length} decisions need review before delivery.`;
   }, [pushState, readyForPush, openEscalations.length]);
 
-  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; events: ApiAuditEvent[]; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
+  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; events: ApiAuditEvent[]; records: ApiRecord[]; mappings: ApiMapping[]; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
     setRunId(serverRun.id);
     setServerMetrics(serverRun.metrics);
     setAuditEvents(serverRun.events);
+    setApiRecords(serverRun.records);
+    setApiMappings(serverRun.mappings);
     setEscalations(serverRun.escalations.map((item) => ({ id: item.id, title: item.title, detail: item.detail, record: item.record_key, confidence: item.confidence, resolution: item.status === 'open' ? 'open' : item.status === 'approved' ? 'approved' : 'rejected' })));
   }
 
@@ -175,6 +179,11 @@ export default function Home() {
   }
 
   async function pushToTarget() {
+    if (pushState === 'complete') {
+      setView('delivery');
+      setNotice('Delivery results are shown below. The complete target response remains in the audit trail.');
+      return;
+    }
     if (!readyForPush) {
       setView('escalations');
       setNotice('Resolve the remaining review decisions before delivering data.');
@@ -198,6 +207,20 @@ export default function Home() {
     const summary = `migrateIQ run ${runId ?? 'draft'}: ${sourceRecords} source records, ${openEscalations.length} open review decisions.`;
     try { await navigator.clipboard.writeText(summary); setNotice('Run summary copied to your clipboard.'); }
     catch { setNotice(summary); }
+  }
+
+  async function rollbackTarget() {
+    if (!runId) {
+      setNotice('Run the server-side analysis before attempting a rollback.');
+      return;
+    }
+    try {
+      applyServerRun(await rollbackMigration(runId));
+      setPushState('idle');
+      setNotice('Mock target deliveries were rolled back and the action was added to the audit trail.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not roll back the target deliveries.');
+    }
   }
 
   return (
@@ -229,10 +252,10 @@ export default function Home() {
         <div className="content">
           {notice && <div className="notice" role="status"><span>✓</span>{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}>×</button></div>}
           {view === 'overview' && <Overview stage={stage} sourceRecords={sourceRecords} recordsReady={recordsReady} openEscalations={openEscalations} runState={runState} pushState={pushState} summary={summary} onBegin={beginRun} onNavigate={setView} onPush={pushToTarget} />}
-          {view === 'dataset' && <Dataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} sourceRecords={sourceRecords} />}
-          {view === 'mapping' && <Mapping onNotice={setNotice} />}
+          {view === 'dataset' && <Dataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} sourceRecords={sourceRecords} apiRecords={apiRecords} />}
+          {view === 'mapping' && <Mapping onNotice={setNotice} apiMappings={apiMappings} />}
           {view === 'escalations' && <EscalationQueue items={escalations} onResolve={resolveEscalation} resolved={resolvedCount} />}
-          {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} />}
+          {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} onRollback={rollbackTarget} />}
           {view === 'audit' && <Audit items={escalations} events={auditEvents} />}
         </div>
       </div>
@@ -258,12 +281,14 @@ function Overview({ stage, sourceRecords, recordsReady, openEscalations, runStat
   </>;
 }
 
-function Dataset({ files, onFiles, recordsReady, sourceRecords }: { files: string[]; onFiles: (event: ChangeEvent<HTMLInputElement>) => void; recordsReady: number; sourceRecords: number }) {
-  return <><SectionTitle eyebrow="SOURCE DATA" title="A unified employee dataset" body="The agent reconciles multiple exports into one reviewable source of truth." action={<label className="primary-button upload-label">Add source files <input aria-label="Add source files" type="file" multiple accept=".csv,.xlsx,.xls" onChange={onFiles} /></label>} /><div className="grid-two dataset-summary"><Card><p className="eyebrow">INGESTION</p><h2>{files.length ? `${files.length} newly selected file${files.length > 1 ? 's' : ''}` : '2 source files connected'}</h2><div className="file-list">{(files.length ? files : ['northstar_people.csv', 'benefits_export.xlsx']).map((file, index) => <div key={file}><span className="file-icon">{file.endsWith('csv') ? 'CSV' : 'XLS'}</span><div><b>{file}</b><small>{index === 0 ? '24 records · 12 columns' : '18 records · 9 columns'}</small></div><Badge tone="good">Profiled</Badge></div>)}</div></Card><Card><p className="eyebrow">QUALITY SNAPSHOT</p><h2>Records are being treated conservatively</h2><div className="quality-bars"><div><span>Ready for target</span><b>{recordsReady} / {sourceRecords}</b><i><em style={{ width: `${(recordsReady / sourceRecords) * 100}%` }} /></i></div><div><span>Needs review</span><b>{sourceRecords - recordsReady} / {sourceRecords}</b><i className="amber"><em style={{ width: `${((sourceRecords - recordsReady) / sourceRecords) * 100}%` }} /></i></div></div><p className="small-note">No records are silently discarded. Exclusions require a human decision and leave an audit entry.</p></Card></div><Card className="data-table-card"><div className="card-heading"><div><p className="eyebrow">CANONICAL RECORDS</p><h2>Employee preview</h2></div><Badge tone="neutral">{sourceRecords} records</Badge></div><div className="table-wrap"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Target status</th><th>Agent note</th></tr></thead><tbody>{records.map(row => <tr key={row.id}><td><span className="person-initial">{row.name.split(' ').map(x => x[0]).join('')}</span><b>{row.name}</b></td><td>{row.id}</td><td><Badge tone={row.state === 'Ready' ? 'good' : 'warning'}>{row.state}</Badge></td><td>{row.note}</td></tr>)}</tbody></table></div></Card></>;
+function Dataset({ files, onFiles, recordsReady, sourceRecords, apiRecords }: { files: string[]; onFiles: (event: ChangeEvent<HTMLInputElement>) => void; recordsReady: number; sourceRecords: number; apiRecords: ApiRecord[] }) {
+  const preview: Array<{ id: string; key: string; name: string; state: string; note: string } | { id: string; name: string; state: string; note: string }> = apiRecords.length ? apiRecords.map(row => ({ id: row.id, name: `${row.payload.given_name ?? ''} ${row.payload.family_name ?? ''}`.trim() || row.key, key: row.key, state: row.status === 'ready' ? 'Ready' : row.status === 'excluded' ? 'Excluded' : 'Review', note: row.status === 'ready' ? 'Passed server-side validation' : row.status === 'excluded' ? 'Excluded by reviewer' : 'Awaiting a review decision' })) : records;
+  return <><SectionTitle eyebrow="SOURCE DATA" title="A unified employee dataset" body="The agent reconciles multiple exports into one reviewable source of truth." action={<label className="primary-button upload-label">Add source files <input aria-label="Add source files" type="file" multiple accept=".csv,.xlsx,.xls" onChange={onFiles} /></label>} /><div className="grid-two dataset-summary"><Card><p className="eyebrow">INGESTION</p><h2>{files.length ? `${files.length} newly selected file${files.length > 1 ? 's' : ''}` : '2 source files connected'}</h2><div className="file-list">{(files.length ? files : ['northstar_people.csv', 'benefits_export.xlsx']).map((file, index) => <div key={file}><span className="file-icon">{file.endsWith('csv') ? 'CSV' : 'XLS'}</span><div><b>{file}</b><small>{index === 0 ? 'Profiled by the backend' : 'Merged into the same entity'}</small></div><Badge tone="good">Profiled</Badge></div>)}</div></Card><Card><p className="eyebrow">QUALITY SNAPSHOT</p><h2>Records are being treated conservatively</h2><div className="quality-bars"><div><span>Ready for target</span><b>{recordsReady} / {sourceRecords}</b><i><em style={{ width: `${(recordsReady / sourceRecords) * 100}%` }} /></i></div><div><span>Needs review</span><b>{sourceRecords - recordsReady} / {sourceRecords}</b><i className="amber"><em style={{ width: `${((sourceRecords - recordsReady) / sourceRecords) * 100}%` }} /></i></div></div><p className="small-note">No records are silently discarded. Exclusions require a human decision and leave an audit entry.</p></Card></div><Card className="data-table-card"><div className="card-heading"><div><p className="eyebrow">CANONICAL RECORDS</p><h2>Employee preview</h2></div><Badge tone="neutral">{apiRecords.length || sourceRecords} records</Badge></div><div className="table-wrap"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Target status</th><th>Agent note</th></tr></thead><tbody>{preview.map(row => <tr key={row.id}><td><span className="person-initial">{row.name.split(' ').map(x => x[0]).join('')}</span><b>{row.name}</b></td><td>{'key' in row ? row.key : row.id}</td><td><Badge tone={row.state === 'Ready' ? 'good' : 'warning'}>{row.state}</Badge></td><td>{row.note}</td></tr>)}</tbody></table></div></Card></>;
 }
 
-function Mapping({ onNotice }: { onNotice: (message: string) => void }) {
-  return <><SectionTitle eyebrow="FIELD MAPPING" title="Evidence-led mapping, not black-box guessing" body="The agent combines header similarity, data type, and sample values; low-confidence mappings are never applied silently." action={<button className="secondary-button" onClick={() => { downloadJson('migration-field-mappings.json', mappings); onNotice('Field mapping exported as JSON.'); }}>Export mapping</button>} /><Card className="mapping-intro"><span>✦</span><div><b>11 mappings are ready to apply</b><p>Each decision includes explainable evidence and a confidence score. You can override any mapping before delivery.</p></div><Badge tone="good">8 exact · 3 inferred</Badge></Card><Card className="mapping-table"><div className="table-wrap"><table><thead><tr><th>Source field</th><th></th><th>Target field</th><th>Why this mapping is safe</th><th>Confidence</th><th></th></tr></thead><tbody>{mappings.map(([source, target, evidence, confidence]) => <tr key={source}><td><code>{source}</code></td><td className="arrow-cell">→</td><td><code className="target-code">{target}</code></td><td>{evidence}</td><td><span className="confidence-score">{confidence}</span></td><td><button className="row-button" onClick={() => onNotice(`${source} → ${target}: ${evidence}. Confidence ${confidence}.`)}>Explain</button></td></tr>)}</tbody></table></div></Card><div className="mapping-foot"><span>⌁</span><p><b>Guardrail:</b> A mapping must meet a high-confidence threshold and pass sample validation. Otherwise it enters the review queue with its evidence.</p></div></>;
+function Mapping({ onNotice, apiMappings }: { onNotice: (message: string) => void; apiMappings: ApiMapping[] }) {
+  const displayedMappings = apiMappings.length ? apiMappings.map(item => [item.source_field, item.target_field, item.reason, `${item.confidence}%`]) : mappings;
+  return <><SectionTitle eyebrow="FIELD MAPPING" title="Evidence-led mapping, not black-box guessing" body="The agent combines header similarity, data type, and sample values; low-confidence mappings are never applied silently." action={<button className="secondary-button" onClick={() => { downloadJson('migration-field-mappings.json', displayedMappings); onNotice('Field mapping exported as JSON.'); }}>Export mapping</button>} /><Card className="mapping-intro"><span>✦</span><div><b>{displayedMappings.length} mappings are ready to apply</b><p>Each decision includes explainable evidence and a confidence score. You can override any mapping before delivery.</p></div><Badge tone="good">Server profiled</Badge></Card><Card className="mapping-table"><div className="table-wrap"><table><thead><tr><th>Source field</th><th></th><th>Target field</th><th>Why this mapping is safe</th><th>Confidence</th><th></th></tr></thead><tbody>{displayedMappings.map(([source, target, evidence, confidence]) => <tr key={`${source}-${target}`}><td><code>{source}</code></td><td className="arrow-cell">→</td><td><code className="target-code">{target}</code></td><td>{evidence}</td><td><span className="confidence-score">{confidence}</span></td><td><button className="row-button" onClick={() => onNotice(`${source} → ${target}: ${evidence}. Confidence ${confidence}.`)}>Explain</button></td></tr>)}</tbody></table></div></Card><div className="mapping-foot"><span>⌁</span><p><b>Guardrail:</b> A mapping must meet a high-confidence threshold and pass sample validation. Otherwise it enters the review queue with its evidence.</p></div></>;
 }
 
 function EscalationQueue({ items, onResolve, resolved }: { items: Escalation[]; onResolve: (id: string, resolution: Exclude<Resolution, 'open'>, correction?: string) => void; resolved: number }) {
@@ -271,9 +296,18 @@ function EscalationQueue({ items, onResolve, resolved }: { items: Escalation[]; 
   return <><SectionTitle eyebrow="REVIEW QUEUE" title="Only genuine ambiguity reaches you" body="Each case shows the competing evidence, so a consultant can resolve it without inspecting raw data." action={<Badge tone={open.length ? 'warning' : 'good'}>{open.length ? `${open.length} decisions open` : 'Review complete'}</Badge>} />{open.length > 0 ? <div className="escalation-stack">{open.map((item, index) => <Card className="escalation-card" key={item.id}><div className="escalation-number">{String(index + 1).padStart(2, '0')}</div><div className="escalation-main"><div className="escalation-top"><div><Badge tone="warning">Needs judgment</Badge><h2>{item.title}</h2></div><span className="case-id">{item.id}</span></div><p>{item.detail}</p><div className="evidence"><div><small>RECORD</small><b>{item.record}</b></div><div><small>AGENT CONFIDENCE</small><b>{item.confidence}% <i><em style={{ width: `${item.confidence}%` }} /></i></b></div><div><small>WHY IT PAUSED</small><b>Conflicting valid interpretations</b></div></div><div className="review-actions"><button className="secondary-button" onClick={() => onResolve(item.id, 'rejected')}>Exclude record</button><button className="secondary-button" onClick={() => { const hint = item.title.includes('date') ? ' Enter YYYY-MM-DD.' : item.title.includes('email') ? ' Enter the corrected email.' : ''; const correction = window.prompt(`Record the correction for “${item.title}”.${hint}`); if (correction?.trim()) onResolve(item.id, 'approved', correction.trim()); }}>Correct decision</button><button className="primary-button" onClick={() => onResolve(item.id, 'approved')}>Approve recommendation <span>→</span></button></div></div></Card>)}</div> : <Card className="review-complete"><span>✓</span><div><p className="eyebrow">REVIEW COMPLETE</p><h2>Every ambiguous case has a recorded decision</h2><p>You can now deliver the validated dataset. Decisions remain reversible and visible in the audit trail.</p></div></Card>} {resolved > 0 && <p className="resolved-note">{resolved} decision{resolved > 1 ? 's' : ''} resolved in this session.</p>}</>;
 }
 
-function Delivery({ ready, state, onPush }: { ready: boolean; state: string; onPush: () => void }) {
+function Delivery({ ready, state, onPush, onRollback }: { ready: boolean; state: string; onPush: () => void; onRollback: () => void }) {
   const delivered = state === 'complete';
-  return <><SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} /><Card className="delivery-hero"><div className="delivery-status"><span className={`delivery-orb ${delivered ? 'success' : ''}`}>{delivered ? '✓' : '↑'}</span><div><h2>{delivered ? '24 employee records delivered' : ready ? 'Your payload is ready' : 'Review decisions are still required'}</h2><p>{delivered ? '23 records were accepted immediately. A simulated rate-limit response was retried and then accepted.' : ready ? 'All records passed target-schema validation. Use the controlled push below to send them to the mock target.' : 'The system prevents delivery while any record has an unresolved ambiguity.'}</p></div></div><div className="delivery-metrics"><div><b>{delivered ? '24' : '24'}</b><span>validated payloads</span></div><div><b>{delivered ? '1' : '0'}</b><span>retried requests</span></div><div><b>0</b><span>silent failures</span></div></div><button className="primary-wide" onClick={onPush} disabled={state === 'sending'}>{state === 'sending' ? 'Sending to target…' : delivered ? 'Re-run delivery simulation' : 'Push validated records to target'} <span>→</span></button></Card><Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card></>;
+  return <>
+    <SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} />
+    <Card className="delivery-hero">
+      <div className="delivery-status"><span className={`delivery-orb ${delivered ? 'success' : ''}`}>{delivered ? '✓' : '↑'}</span><div><h2>{delivered ? 'Validated records delivered' : ready ? 'Your payload is ready' : 'Review decisions are still required'}</h2><p>{delivered ? 'The mock target accepted each validated record. Its deterministic transient failure was retried once, and every response is in the audit trail.' : ready ? 'All remaining records passed target-schema validation. Use the controlled push below to send them to the mock target.' : 'The system prevents delivery while any record has an unresolved ambiguity.'}</p></div></div>
+      <div className="delivery-metrics"><div><b>{delivered ? 'Complete' : 'Ready'}</b><span>delivery status</span></div><div><b>{delivered ? '1' : '—'}</b><span>retried requests</span></div><div><b>0</b><span>silent failures</span></div></div>
+      <button className="primary-wide" onClick={onPush} disabled={state === 'sending' || delivered}>{state === 'sending' ? 'Sending to target…' : delivered ? 'Delivery complete' : 'Push validated records to target'} <span>→</span></button>
+      {delivered && <button className="secondary-wide" onClick={onRollback}>Roll back mock delivery</button>}
+    </Card>
+    <Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card>
+  </>;
 }
 
 function Audit({ items, events }: { items: Escalation[]; events: ApiAuditEvent[] }) {

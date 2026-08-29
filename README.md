@@ -14,7 +14,7 @@ A focused, interview-ready prototype for the DarwinBox Forward Deployed Engineer
 
 The "agent" is deliberately constrained. It executes only transformations that are high confidence, reversible, and validated against the target shape. It escalates when source evidence supports more than one valid interpretation, a required value cannot be repaired confidently, or validation does not converge. This gives an implementation consultant a compact review queue instead of a noisy approval workflow.
 
-The prototype runs locally and uses realistic seeded migration data so the happy path and review path are both immediately demoable. In a production implementation, the same deterministic confidence policy would sit beside an LLM-assisted mapper, with persisted runs, real file parsing, and a real target connector.
+The prototype runs locally and uses realistic seeded migration data so the happy path and review path are both immediately demoable. It persists runs in SQLite and accepts real CSV/XLSX uploads; a production implementation would replace the mock target connector with a tenant-scoped DarwinBox integration.
 
 ## Demo script (about 3 minutes)
 
@@ -22,8 +22,8 @@ The prototype runs locally and uses realistic seeded migration data so the happy
 2. Open **Source data** to show the two source exports consolidated into canonical records.
 3. Open **Field mapping** to explain that every inferred mapping has visible evidence and confidence.
 4. Open **Review queue**. Approve, exclude, or edit the seeded ambiguous date, location, duplicate-conflict, and missing-required-value cases to demonstrate human control and auditability.
-5. Complete the decisions, return to **Target delivery**, and push to the mock API.
-6. End in **Audit trail**, where automated work and human judgments are recorded together.
+5. Complete the decisions, return to **Target delivery**, and push to the mock API. The visible retry and **Roll back mock delivery** controls exercise the delivery safeguards.
+6. End in **Audit trail**, where automated work, human judgments, target responses, and any rollback are recorded together.
 
 ## Local development
 
@@ -67,7 +67,7 @@ or overrides validation rules. Its outcome is recorded in the run audit trail.
 
 ## What I would build next
 
-1. Persist migration runs, raw-file fingerprints, decisions, and target responses in a tenant-scoped data store.
-2. Add parser adapters for CSV/XLSX and a JSON/YAML schema upload flow.
-3. Use an LLM only to propose mappings and explanations, backed by deterministic confidence scoring and validation rules.
-4. Add row-level diff previews, bulk decisions, role-based review permissions, and true rollback support where the target API permits it.
+1. Move the SQLite run store to a tenant-scoped production database with raw-file fingerprints and retention controls.
+2. Add YAML schema support and richer parser diagnostics for large or malformed source exports.
+3. Expand the OpenAI advisor to propose mappings and explanations, still backed by deterministic confidence scoring and validation rules.
+4. Add row-level diff previews, bulk decisions, role-based review permissions, and a live target rollback where the target API permits it.

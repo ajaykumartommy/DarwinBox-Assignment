@@ -14,7 +14,7 @@ The agent must pause where a reasonable person could make more than one valid ch
 
 ## Delivery and trust
 
-The mock target client models idempotent upsert behavior and a transient error that succeeds on a single retry. A production version would persist tenant-scoped run state, raw-file fingerprints, original and transformed values, reviewer identity, and each target response. It would also replace the seeded fixtures with CSV/XLSX parsers, target-schema upload, a real connector, role-based approvals, and explicit rollback where the target supports it.
+The mock target client models idempotent upsert behavior and a transient error that succeeds on a single retry. This prototype persists run state, canonical records, mappings, reviewer decisions, and target responses in SQLite; it accepts CSV/XLSX sources and an optional JSON target schema. A production version would add tenant isolation, raw-file fingerprints, a live connector, role-based approvals, and live rollback where the target supports it.
 
 ## Prototype implementation
 
