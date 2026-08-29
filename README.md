@@ -57,6 +57,14 @@ delivery, and explicit rollback endpoints. FastAPI also provides interactive API
 documentation at `http://localhost:8000/docs` while running. Use `npm run build`
 for a production UI build.
 
+### Optional OpenAI advisor
+
+The safety-critical processing path is deterministic by design. To add an
+OpenAI advisory reviewer, set `OPENAI_API_KEY` before starting the API. Optionally
+set `OPENAI_MODEL`; otherwise the app uses `gpt-4.1-mini`. The advisor reviews
+the proposed mappings and escalation boundary; it never writes target records
+or overrides validation rules. Its outcome is recorded in the run audit trail.
+
 ## What I would build next
 
 1. Persist migration runs, raw-file fingerprints, decisions, and target responses in a tenant-scoped data store.

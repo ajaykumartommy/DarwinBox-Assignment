@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .db import Database, json_value, load_json
 from .migration import Escalation, parse_source, process_rows
+from .advisor import review_migration
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -90,6 +91,8 @@ def create_run(files: List[tuple[str, bytes]], target_schema: dict[str, Any]) ->
             connection.execute("INSERT INTO escalations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (str(uuid.uuid4()), run_id, escalation.record_key, escalation.kind, escalation.title, escalation.detail, escalation.confidence, json_value(escalation.evidence), "open", None))
         for item in result.audit:
             event(connection, run_id, item["type"], item["detail"])
+        agent_mode, agent_note = review_migration(target_schema, result.mappings, len(result.escalations))
+        event(connection, run_id, "Agent advisory", agent_note, "OpenAI advisor" if agent_mode == "openai" else "Policy agent")
     return run_summary(run_id)
 
 

@@ -77,6 +77,16 @@ const initialEscalations: Escalation[] = [
   },
 ];
 
+function downloadJson(filename: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'good' | 'warning' | 'blue' }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
@@ -180,6 +190,12 @@ export default function Home() {
     }
   }
 
+  async function shareRun() {
+    const summary = `migrateIQ run ${runId ?? 'draft'}: ${sourceRecords} source records, ${openEscalations.length} open review decisions.`;
+    try { await navigator.clipboard.writeText(summary); setNotice('Run summary copied to your clipboard.'); }
+    catch { setNotice(summary); }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -203,17 +219,17 @@ export default function Home() {
       <div className="main-area">
         <header className="topbar">
           <div className="breadcrumbs">Workspaces <span>/</span> Northstar HR <span>/</span> <b>Employee migration</b></div>
-          <div className="top-actions"><button className="icon-button" aria-label="Notifications">♧</button><button className="icon-button" aria-label="Help">?</button><button className="share-button">Share run</button></div>
+          <div className="top-actions"><button className="icon-button" aria-label="Notifications" onClick={() => setNotice('There are no unread migration notifications.')}>♧</button><button className="icon-button" aria-label="Help" onClick={() => setNotice('Use Run analysis, resolve the review queue, then push the validated records to the mock target.')}>?</button><button className="share-button" onClick={shareRun}>Share run</button></div>
         </header>
 
         <div className="content">
           {notice && <div className="notice" role="status"><span>✓</span>{notice}<button aria-label="Dismiss" onClick={() => setNotice('')}>×</button></div>}
           {view === 'overview' && <Overview stage={stage} sourceRecords={sourceRecords} recordsReady={recordsReady} openEscalations={openEscalations} runState={runState} pushState={pushState} summary={summary} onBegin={beginRun} onNavigate={setView} onPush={pushToTarget} />}
           {view === 'dataset' && <Dataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} sourceRecords={sourceRecords} />}
-          {view === 'mapping' && <Mapping />}
+          {view === 'mapping' && <Mapping onNotice={setNotice} />}
           {view === 'escalations' && <EscalationQueue items={escalations} onResolve={resolveEscalation} resolved={resolvedCount} />}
           {view === 'delivery' && <Delivery ready={readyForPush} state={pushState} onPush={pushToTarget} />}
-          {view === 'audit' && <Audit items={escalations} />}
+          {view === 'audit' && <Audit items={escalations} delivered={pushState === 'complete'} />}
         </div>
       </div>
     </main>
@@ -242,8 +258,8 @@ function Dataset({ files, onFiles, recordsReady, sourceRecords }: { files: strin
   return <><SectionTitle eyebrow="SOURCE DATA" title="A unified employee dataset" body="The agent reconciles multiple exports into one reviewable source of truth." action={<label className="primary-button upload-label">Add source files <input aria-label="Add source files" type="file" multiple accept=".csv,.xlsx,.xls" onChange={onFiles} /></label>} /><div className="grid-two dataset-summary"><Card><p className="eyebrow">INGESTION</p><h2>{files.length ? `${files.length} newly selected file${files.length > 1 ? 's' : ''}` : '2 source files connected'}</h2><div className="file-list">{(files.length ? files : ['northstar_people.csv', 'benefits_export.xlsx']).map((file, index) => <div key={file}><span className="file-icon">{file.endsWith('csv') ? 'CSV' : 'XLS'}</span><div><b>{file}</b><small>{index === 0 ? '24 records · 12 columns' : '18 records · 9 columns'}</small></div><Badge tone="good">Profiled</Badge></div>)}</div></Card><Card><p className="eyebrow">QUALITY SNAPSHOT</p><h2>Records are being treated conservatively</h2><div className="quality-bars"><div><span>Ready for target</span><b>{recordsReady} / {sourceRecords}</b><i><em style={{ width: `${(recordsReady / sourceRecords) * 100}%` }} /></i></div><div><span>Needs review</span><b>{sourceRecords - recordsReady} / {sourceRecords}</b><i className="amber"><em style={{ width: `${((sourceRecords - recordsReady) / sourceRecords) * 100}%` }} /></i></div></div><p className="small-note">No records are silently discarded. Exclusions require a human decision and leave an audit entry.</p></Card></div><Card className="data-table-card"><div className="card-heading"><div><p className="eyebrow">CANONICAL RECORDS</p><h2>Employee preview</h2></div><Badge tone="neutral">{sourceRecords} records</Badge></div><div className="table-wrap"><table><thead><tr><th>Employee</th><th>Employee ID</th><th>Target status</th><th>Agent note</th></tr></thead><tbody>{records.map(row => <tr key={row.id}><td><span className="person-initial">{row.name.split(' ').map(x => x[0]).join('')}</span><b>{row.name}</b></td><td>{row.id}</td><td><Badge tone={row.state === 'Ready' ? 'good' : 'warning'}>{row.state}</Badge></td><td>{row.note}</td></tr>)}</tbody></table></div></Card></>;
 }
 
-function Mapping() {
-  return <><SectionTitle eyebrow="FIELD MAPPING" title="Evidence-led mapping, not black-box guessing" body="The agent combines header similarity, data type, and sample values; low-confidence mappings are never applied silently." action={<button className="secondary-button">Export mapping</button>} /><Card className="mapping-intro"><span>✦</span><div><b>11 mappings are ready to apply</b><p>Each decision includes explainable evidence and a confidence score. You can override any mapping before delivery.</p></div><Badge tone="good">8 exact · 3 inferred</Badge></Card><Card className="mapping-table"><div className="table-wrap"><table><thead><tr><th>Source field</th><th></th><th>Target field</th><th>Why this mapping is safe</th><th>Confidence</th><th></th></tr></thead><tbody>{mappings.map(([source, target, evidence, confidence]) => <tr key={source}><td><code>{source}</code></td><td className="arrow-cell">→</td><td><code className="target-code">{target}</code></td><td>{evidence}</td><td><span className="confidence-score">{confidence}</span></td><td><button className="row-button">Review</button></td></tr>)}</tbody></table></div></Card><div className="mapping-foot"><span>⌁</span><p><b>Guardrail:</b> A mapping must meet a high-confidence threshold and pass sample validation. Otherwise it enters the review queue with its evidence.</p></div></>;
+function Mapping({ onNotice }: { onNotice: (message: string) => void }) {
+  return <><SectionTitle eyebrow="FIELD MAPPING" title="Evidence-led mapping, not black-box guessing" body="The agent combines header similarity, data type, and sample values; low-confidence mappings are never applied silently." action={<button className="secondary-button" onClick={() => { downloadJson('migration-field-mappings.json', mappings); onNotice('Field mapping exported as JSON.'); }}>Export mapping</button>} /><Card className="mapping-intro"><span>✦</span><div><b>11 mappings are ready to apply</b><p>Each decision includes explainable evidence and a confidence score. You can override any mapping before delivery.</p></div><Badge tone="good">8 exact · 3 inferred</Badge></Card><Card className="mapping-table"><div className="table-wrap"><table><thead><tr><th>Source field</th><th></th><th>Target field</th><th>Why this mapping is safe</th><th>Confidence</th><th></th></tr></thead><tbody>{mappings.map(([source, target, evidence, confidence]) => <tr key={source}><td><code>{source}</code></td><td className="arrow-cell">→</td><td><code className="target-code">{target}</code></td><td>{evidence}</td><td><span className="confidence-score">{confidence}</span></td><td><button className="row-button" onClick={() => onNotice(`${source} → ${target}: ${evidence}. Confidence ${confidence}.`)}>Explain</button></td></tr>)}</tbody></table></div></Card><div className="mapping-foot"><span>⌁</span><p><b>Guardrail:</b> A mapping must meet a high-confidence threshold and pass sample validation. Otherwise it enters the review queue with its evidence.</p></div></>;
 }
 
 function EscalationQueue({ items, onResolve, resolved }: { items: Escalation[]; onResolve: (id: string, resolution: Exclude<Resolution, 'open'>, correction?: string) => void; resolved: number }) {
@@ -256,6 +272,11 @@ function Delivery({ ready, state, onPush }: { ready: boolean; state: string; onP
   return <><SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} /><Card className="delivery-hero"><div className="delivery-status"><span className={`delivery-orb ${delivered ? 'success' : ''}`}>{delivered ? '✓' : '↑'}</span><div><h2>{delivered ? '24 employee records delivered' : ready ? 'Your payload is ready' : 'Review decisions are still required'}</h2><p>{delivered ? '23 records were accepted immediately. A simulated rate-limit response was retried and then accepted.' : ready ? 'All records passed target-schema validation. Use the controlled push below to send them to the mock target.' : 'The system prevents delivery while any record has an unresolved ambiguity.'}</p></div></div><div className="delivery-metrics"><div><b>{delivered ? '24' : '24'}</b><span>validated payloads</span></div><div><b>{delivered ? '1' : '0'}</b><span>retried requests</span></div><div><b>0</b><span>silent failures</span></div></div><button className="primary-wide" onClick={onPush} disabled={state === 'sending'}>{state === 'sending' ? 'Sending to target…' : delivered ? 'Re-run delivery simulation' : 'Push validated records to target'} <span>→</span></button></Card><Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card></>;
 }
 
-function Audit({ items }: { items: Escalation[] }) {
-  return <><SectionTitle eyebrow="AUDIT TRAIL" title="A narrative of every meaningful decision" body="This is the handoff artifact for the implementation team: clear enough to trust, detailed enough to investigate." action={<button className="secondary-button">Export audit log</button>} /><Card className="audit-card"><div className="audit-filters"><button className="filter-active">All activity</button><button>Agent actions</button><button>Human decisions</button><button>Target responses</button></div><div className="audit-timeline">{activities.map(([time, type, detail], index) => <div className="audit-event" key={time}><time>Today · {time}</time><span className={`timeline-mark ${index === 5 ? 'review' : ''}`}>{index === 5 ? '!' : '✓'}</span><div><Badge tone={index === 5 ? 'warning' : 'good'}>{type}</Badge><h3>{detail}</h3><p>{index === 5 ? 'The agent stopped because the available evidence supported more than one valid interpretation. No target payload was created for these records.' : 'System action completed automatically because the transformation met the configured confidence and validation rules.'}</p></div></div>)}{items.filter(x => x.resolution !== 'open').map(item => <div className="audit-event" key={item.id}><time>Today · 09:45</time><span className="timeline-mark human">◉</span><div><Badge tone="blue">Human decision</Badge><h3>{item.resolution === 'approved' ? 'Approved: ' : 'Excluded: '}{item.title}</h3><p>Decision {item.resolution} by Alex Singh. Original evidence and agent confidence were preserved.</p></div></div>)}</div></Card></>;
+function Audit({ items, delivered }: { items: Escalation[]; delivered: boolean }) {
+  const [filter, setFilter] = useState<'all' | 'agent' | 'human' | 'target'>('all');
+  const agentEvents = activities.map(([time, type, detail], index) => ({ time, type, detail, review: index === 5 }));
+  const humanEvents = items.filter(x => x.resolution !== 'open').map(item => ({ time: '09:45', type: 'Human decision', detail: `${item.resolution === 'approved' ? 'Approved' : 'Excluded'}: ${item.title}`, review: false }));
+  const targetEvents = delivered ? [{ time: '09:46', type: 'Target response', detail: 'Mock target accepted validated records; one transient response retried successfully.', review: false }] : [];
+  const visible = filter === 'agent' ? agentEvents : filter === 'human' ? humanEvents : filter === 'target' ? targetEvents : [...agentEvents, ...humanEvents, ...targetEvents];
+  return <><SectionTitle eyebrow="AUDIT TRAIL" title="A narrative of every meaningful decision" body="This is the handoff artifact for the implementation team: clear enough to trust, detailed enough to investigate." action={<button className="secondary-button" onClick={() => downloadJson('migration-audit.json', { agentEvents, humanEvents, targetEvents })}>Export audit log</button>} /><Card className="audit-card"><div className="audit-filters">{([['all', 'All activity'], ['agent', 'Agent actions'], ['human', 'Human decisions'], ['target', 'Target responses']] as const).map(([id, label]) => <button key={id} className={filter === id ? 'filter-active' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div><div className="audit-timeline">{visible.length ? visible.map((event, index) => <div className="audit-event" key={`${event.time}-${event.type}-${index}`}><time>Today · {event.time}</time><span className={`timeline-mark ${event.review ? 'review' : event.type === 'Human decision' ? 'human' : ''}`}>{event.review ? '!' : event.type === 'Human decision' ? '◉' : '✓'}</span><div><Badge tone={event.type === 'Human decision' ? 'blue' : event.review ? 'warning' : 'good'}>{event.type}</Badge><h3>{event.detail}</h3><p>{event.review ? 'The agent paused because evidence supported more than one valid interpretation.' : event.type === 'Human decision' ? 'Reviewer action is retained with the original evidence and confidence.' : 'Recorded as an auditable system event.'}</p></div></div>) : <div className="empty-state"><span>•</span><b>No events in this view yet</b><p>Run analysis or complete delivery to add an event.</p></div>}</div></Card></>;
 }
