@@ -1,0 +1,12 @@
+{
+  "entity": "employee",
+  "fields": [
+    { "name": "employeeNumber", "required": true, "format": "string" },
+    { "name": "given_name", "required": true, "format": "string" },
+    { "name": "family_name", "required": true, "format": "string" },
+    { "name": "email", "required": true, "format": "email" },
+    { "name": "joined_on", "required": true, "format": "date" },
+    { "name": "team_name", "format": "string" },
+    { "name": "phone", "format": "phone" }
+  ]
+}
