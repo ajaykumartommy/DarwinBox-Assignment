@@ -14,14 +14,14 @@ A focused, interview-ready prototype for the DarwinBox Forward Deployed Engineer
 
 The "agent" is deliberately constrained. It executes only transformations that are high confidence, reversible, and validated against the target shape. It escalates when source evidence supports more than one valid interpretation, a required value cannot be repaired confidently, or validation does not converge. This gives an implementation consultant a compact review queue instead of a noisy approval workflow.
 
-The prototype runs locally and uses realistic seeded migration data so the happy path and review path are both immediately demoable. It persists runs in SQLite and accepts real CSV/XLSX uploads; a production implementation would replace the mock target connector with a tenant-scoped DarwinBox integration.
+The prototype runs locally and includes realistic sample exports so the happy path and review path are immediately demoable. The UI requires the user to upload source files before analysis. It persists runs in SQLite and accepts real CSV/XLSX uploads; a production implementation would replace the mock target connector with a tenant-scoped DarwinBox integration.
 
 ## Demo script (about 3 minutes)
 
 1. Open **Source data** and upload the two source exports.
 2. Open **Migration run** and frame the autonomy boundary in the "What the agent handled" card.
 3. Open **Field mapping** to explain that every inferred mapping has visible evidence and confidence.
-4. Open **Review queue**. Approve, exclude, or edit the seeded ambiguous date, location, duplicate-conflict, and missing-required-value cases to demonstrate human control and auditability.
+4. Open **Review queue**. Approve, exclude, or edit the ambiguous date, location, duplicate-conflict, and missing-required-value cases from the uploaded samples to demonstrate human control and auditability.
 5. Complete the decisions, return to **Target delivery**, and push to the mock API. The visible retry and **Roll back mock delivery** controls exercise the delivery safeguards.
 6. End in **Audit trail**, where automated work, human judgments, target responses, and any rollback are recorded together.
 
