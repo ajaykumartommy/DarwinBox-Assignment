@@ -2,7 +2,8 @@ export type ApiEscalation = { id: string; record_key: string; title: string; det
 export type ApiAuditEvent = { event_type: string; detail: string; actor: string; created_at: string };
 export type ApiRecord = { id: string; key: string; payload: Record<string, string>; status: string };
 export type ApiMapping = { id: string; source_field: string; target_field: string; confidence: number; reason: string; status: string };
-export type RunSnapshot = { id: string; status: string; metrics: { source_records: number; ready_records: number; open_escalations: number }; records: ApiRecord[]; mappings: ApiMapping[]; escalations: ApiEscalation[]; deliveries: Array<{ attempts: number; status: string }>; events: ApiAuditEvent[] };
+export type ApiDelivery = { id: string; record_id: string; status: string; attempts: number; response: { status?: number; message?: string; retry?: { status?: number; message?: string } }; created_at: string };
+export type RunSnapshot = { id: string; status: string; metrics: { source_records: number; ready_records: number; open_escalations: number }; records: ApiRecord[]; mappings: ApiMapping[]; escalations: ApiEscalation[]; deliveries: ApiDelivery[]; events: ApiAuditEvent[] };
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 

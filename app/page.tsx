@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { deliverMigration, resolveMigrationEscalation, rollbackMigration, uploadMigration } from '../lib/api';
-import type { ApiAuditEvent, ApiMapping, ApiRecord } from '../lib/api';
+import type { ApiAuditEvent, ApiDelivery, ApiMapping, ApiRecord } from '../lib/api';
 
 type View = 'overview' | 'dataset' | 'mapping' | 'escalations' | 'delivery' | 'audit';
 type Resolution = 'open' | 'approved' | 'rejected';
@@ -74,6 +74,7 @@ export default function Home() {
   const [auditEvents, setAuditEvents] = useState<ApiAuditEvent[]>([]);
   const [apiRecords, setApiRecords] = useState<ApiRecord[]>([]);
   const [apiMappings, setApiMappings] = useState<ApiMapping[]>([]);
+  const [deliveryResults, setDeliveryResults] = useState<ApiDelivery[]>([]);
 
   const openEscalations = escalations.filter((item) => item.resolution === 'open');
   const resolvedCount = escalations.length - openEscalations.length;
@@ -90,12 +91,13 @@ export default function Home() {
     return `${openEscalations.length} decisions need review before delivery.`;
   }, [hasRun, pushState, readyForPush, openEscalations.length]);
 
-  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; events: ApiAuditEvent[]; records: ApiRecord[]; mappings: ApiMapping[]; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
+  function applyServerRun(serverRun: { id: string; metrics: { source_records: number; ready_records: number }; events: ApiAuditEvent[]; records: ApiRecord[]; mappings: ApiMapping[]; deliveries: ApiDelivery[]; escalations: Array<{ id: string; title: string; detail: string; record_key: string; confidence: number; status: string }> }) {
     setRunId(serverRun.id);
     setServerMetrics(serverRun.metrics);
     setAuditEvents(serverRun.events);
     setApiRecords(serverRun.records);
     setApiMappings(serverRun.mappings);
+    setDeliveryResults(serverRun.deliveries);
     setEscalations(serverRun.escalations.map((item) => ({ id: item.id, title: item.title, detail: item.detail, record: item.record_key, confidence: item.confidence, resolution: item.status === 'open' ? 'open' : item.status === 'approved' ? 'approved' : 'rejected' })));
   }
 
@@ -219,7 +221,7 @@ export default function Home() {
           {view === 'dataset' && <UploadDataset files={uploadedFiles} onFiles={onFiles} recordsReady={recordsReady} sourceRecords={sourceRecords} apiRecords={apiRecords} />}
           {view === 'mapping' && <Mapping onNotice={setNotice} apiMappings={apiMappings} />}
           {view === 'escalations' && <EscalationQueue items={escalations} hasRun={hasRun} onResolve={resolveEscalation} resolved={resolvedCount} />}
-          {view === 'delivery' && <Delivery ready={readyForPush} hasRun={hasRun} state={pushState} onPush={pushToTarget} onRollback={rollbackTarget} />}
+          {view === 'delivery' && <Delivery ready={readyForPush} hasRun={hasRun} state={pushState} records={apiRecords} results={deliveryResults} onPush={pushToTarget} onRollback={rollbackTarget} />}
           {view === 'audit' && <Audit items={escalations} events={auditEvents} />}
         </div>
       </div>
@@ -272,8 +274,9 @@ function EscalationQueue({ items, hasRun, onResolve, resolved }: { items: Escala
   return <><SectionTitle eyebrow="REVIEW QUEUE" title="Only genuine ambiguity reaches you" body="Each case shows the competing evidence, so a consultant can resolve it without inspecting raw data." action={<Badge tone={open.length ? 'warning' : 'good'}>{open.length ? `${open.length} decisions open` : 'Review complete'}</Badge>} />{open.length > 0 ? <div className="escalation-stack">{open.map((item, index) => <Card className="escalation-card" key={item.id}><div className="escalation-number">{String(index + 1).padStart(2, '0')}</div><div className="escalation-main"><div className="escalation-top"><div><Badge tone="warning">Needs judgment</Badge><h2>{item.title}</h2></div><span className="case-id">{item.id}</span></div><p>{item.detail}</p><div className="evidence"><div><small>RECORD</small><b>{item.record}</b></div><div><small>AGENT CONFIDENCE</small><b>{item.confidence}% <i><em style={{ width: `${item.confidence}%` }} /></i></b></div><div><small>WHY IT PAUSED</small><b>Conflicting valid interpretations</b></div></div><div className="review-actions"><button className="secondary-button" onClick={() => onResolve(item.id, 'rejected')}>Exclude record</button><button className="secondary-button" onClick={() => { const hint = item.title.includes('date') ? ' Enter YYYY-MM-DD.' : item.title.includes('email') ? ' Enter the corrected email.' : ''; const correction = window.prompt(`Record the correction for “${item.title}”.${hint}`); if (correction?.trim()) onResolve(item.id, 'approved', correction.trim()); }}>Correct decision</button><button className="primary-button" onClick={() => onResolve(item.id, 'approved')}>Approve recommendation <span>→</span></button></div></div></Card>)}</div> : <Card className="review-complete"><span>✓</span><div><p className="eyebrow">REVIEW COMPLETE</p><h2>Every ambiguous case has a recorded decision</h2><p>You can now deliver the validated dataset. Decisions remain reversible and visible in the audit trail.</p></div></Card>} {resolved > 0 && <p className="resolved-note">{resolved} decision{resolved > 1 ? 's' : ''} resolved in this session.</p>}</>;
 }
 
-function Delivery({ ready, hasRun, state, onPush, onRollback }: { ready: boolean; hasRun: boolean; state: string; onPush: () => void; onRollback: () => void }) {
+function Delivery({ ready, hasRun, state, records, results, onPush, onRollback }: { ready: boolean; hasRun: boolean; state: string; records: ApiRecord[]; results: ApiDelivery[]; onPush: () => void; onRollback: () => void }) {
   const delivered = state === 'complete';
+  const recordNames = new Map(records.map(record => [record.id, record.key]));
   return <>
     <SectionTitle eyebrow="TARGET DELIVERY" title="Controlled, observable handoff" body="The target client is intentionally simple, but every record result is visible and retry-safe." action={<Badge tone={delivered ? 'good' : ready ? 'blue' : 'warning'}>{delivered ? 'Delivered' : ready ? 'Ready to send' : 'Blocked by review'}</Badge>} />
     <Card className="delivery-hero">
@@ -283,6 +286,7 @@ function Delivery({ ready, hasRun, state, onPush, onRollback }: { ready: boolean
       {delivered && <button className="secondary-wide" onClick={onRollback}>Roll back mock delivery</button>}
     </Card>
     <Card className="target-contract"><div><p className="eyebrow">MOCK TARGET CONTRACT</p><h2>DarwinBox sandbox API</h2><code>POST /v1/employees</code></div><div><small>WRITE SEMANTICS</small><b>Idempotent upsert by employeeNumber</b></div><div><small>FAILURE POLICY</small><b>Retry transient errors once; preserve all response bodies</b></div><div><small>ROLLBACK</small><b>Available as an explicit audited action</b></div></Card>
+    {hasRun && <Card className="delivery-results"><div className="card-heading"><div><p className="eyebrow">PER-RECORD RESPONSES</p><h2>{results.length ? 'Target response ledger' : 'No target responses yet'}</h2></div><Badge tone="neutral">{results.length ? `${results.length} responses` : 'Waiting for delivery'}</Badge></div>{results.length ? <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Target status</th><th>Attempts</th><th>Response</th></tr></thead><tbody>{results.map(result => <tr key={result.id}><td><code>{recordNames.get(result.record_id) ?? result.record_id}</code></td><td><Badge tone={result.status === 'accepted' ? 'good' : 'warning'}>{result.status}</Badge></td><td>{result.attempts}{result.attempts > 1 ? ' · retried' : ''}</td><td>{result.response.message ?? 'Response recorded'}{result.response.retry ? ` (${result.response.retry.status} retry)` : ''}</td></tr>)}</tbody></table></div> : <div className="empty-state"><span>↑</span><b>Push validated records to populate responses</b><p>Each target response and retry count will remain visible here.</p></div>}</Card>}
   </>;
 }
 

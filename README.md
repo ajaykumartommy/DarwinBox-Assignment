@@ -14,7 +14,7 @@ A focused, interview-ready prototype for the DarwinBox Forward Deployed Engineer
 
 The "agent" is deliberately constrained. It executes only transformations that are high confidence, reversible, and validated against the target shape. It escalates when source evidence supports more than one valid interpretation, a required value cannot be repaired confidently, or validation does not converge. This gives an implementation consultant a compact review queue instead of a noisy approval workflow.
 
-The prototype runs locally and includes realistic sample exports so the happy path and review path are immediately demoable. The UI requires the user to upload source files before analysis. It persists runs in SQLite and accepts real CSV/XLSX uploads; a production implementation would replace the mock target connector with a tenant-scoped DarwinBox integration.
+The prototype runs locally and includes realistic sample exports for a repeatable demo. The UI requires the user to upload source files before analysis. It persists runs in SQLite and accepts real CSV/XLSX uploads; a production implementation would replace the mock target connector with a tenant-scoped DarwinBox integration.
 
 ## Demo script (about 3 minutes)
 
