@@ -7,6 +7,7 @@ A focused, interview-ready prototype for the DarwinBox Forward Deployed Engineer
 - Multi-file source ingestion, with a lightweight upload interaction; analysis requires the user to select source files.
 - Evidence-led field mapping: headers, value formats, and semantic signals build confidence; risky mappings do not silently apply.
 - Safe normalization and duplicate reconciliation, with a clear autonomy boundary.
+- Two-pass target validation; values that still fail are escalated with the attempt evidence.
 - Human review only for genuine ambiguity. Decisions can be approved, edited, or excluded and are retained in the audit trail.
 - Controlled mock target delivery, with idempotent-upsert semantics, simulated retry behavior, and per-record accountability.
 

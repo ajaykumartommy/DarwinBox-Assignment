@@ -122,6 +122,22 @@ def normalise_value(value: str, field: Dict[str, Any], key: str, escalations: Li
     return value
 
 
+def validation_error(value: str, field: Dict[str, Any]) -> Optional[str]:
+    """Return a target-shape error, if any, for one deterministic validation pass."""
+    if field.get("required") and not value:
+        return "required value is empty"
+    if not value:
+        return None
+    fmt = field.get("format", "string")
+    if fmt == "email" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+        return "email format is invalid"
+    if fmt == "phone" and not re.fullmatch(r"\+?\d{7,15}", value):
+        return "phone format is invalid"
+    if fmt == "date" and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return "date must be ISO-8601"
+    return None
+
+
 def mapping_summary(source_rows: Iterable[Row], fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     headers = {header for row in source_rows for header in row}
     result = []
@@ -157,11 +173,21 @@ def process_rows(source_rows: List[Row], target_schema: Dict[str, Any]) -> Proce
             value, _, _ = field_value(source, target["name"])
             normalized = normalise_value(value, target, preliminary_key, escalations)
             row[target["name"]] = normalized
-            if target.get("required") and not normalized and not value:
+            error = None
+            attempts = 0
+            for _ in range(2):
+                attempts += 1
+                error = validation_error(normalized, target)
+                if not error:
+                    break
+            # Ambiguous dates already have a more useful, specific escalation.
+            date_was_escalated = target.get("format") == "date" and bool(value) and not normalized
+            if error and not date_was_escalated:
                 escalations.append(Escalation(
-                    kind="validation_failure", record_key=preliminary_key, title=f"Provide required {target['name']}",
-                    detail=f"No valid value was available for required target field '{target['name']}'.",
-                    confidence=0, evidence={"target_field": target["name"]},
+                    kind="validation_failure", record_key=preliminary_key,
+                    title=f"Fix invalid {target['name']}",
+                    detail=f"Validation did not converge after {attempts} passes: {error}.",
+                    confidence=0, evidence={"target_field": target["name"], "validation_attempts": attempts, "error": error},
                 ))
         transformed.append(row)
 

@@ -10,7 +10,7 @@ The agent can perform transformations when they are high confidence, explainable
 
 ## Where it escalates
 
-The agent must pause where a reasonable person could make more than one valid choice: a source column that could map to two target fields, a date such as `03/04/2024`, contradictory duplicate values, a missing required value that cannot be safely repaired, or repeated validation failure. Escalations include the record, evidence, confidence, and reason for pausing. A human can approve the recommendation, edit it, or exclude the record; the decision is reflected in the audit timeline.
+The agent must pause where a reasonable person could make more than one valid choice: a source column that could map to two target fields, a date such as `03/04/2024`, contradictory duplicate values, a missing required value that cannot be safely repaired, or a value that still fails after two target-schema validation passes. Escalations include the record, evidence, confidence, and reason for pausing. A human can approve the recommendation, edit it, or exclude the record; the decision is reflected in the audit timeline.
 
 ## Delivery and trust
 
