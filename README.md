@@ -4,7 +4,7 @@ A focused, interview-ready prototype for the DarwinBox Forward Deployed Engineer
 
 ## What it demonstrates
 
-- Multi-file source ingestion, with a lightweight upload interaction and a seeded two-file demo workspace.
+- Multi-file source ingestion, with a lightweight upload interaction; analysis requires the user to select source files.
 - Evidence-led field mapping: headers, value formats, and semantic signals build confidence; risky mappings do not silently apply.
 - Safe normalization and duplicate reconciliation, with a clear autonomy boundary.
 - Human review only for genuine ambiguity. Decisions can be approved, edited, or excluded and are retained in the audit trail.
@@ -18,8 +18,8 @@ The prototype runs locally and uses realistic seeded migration data so the happy
 
 ## Demo script (about 3 minutes)
 
-1. Open **Migration run** and frame the autonomy boundary in the "What the agent handled" card.
-2. Open **Source data** to show the two source exports consolidated into canonical records.
+1. Open **Source data** and upload the two source exports.
+2. Open **Migration run** and frame the autonomy boundary in the "What the agent handled" card.
 3. Open **Field mapping** to explain that every inferred mapping has visible evidence and confidence.
 4. Open **Review queue**. Approve, exclude, or edit the seeded ambiguous date, location, duplicate-conflict, and missing-required-value cases to demonstrate human control and auditability.
 5. Complete the decisions, return to **Target delivery**, and push to the mock API. The visible retry and **Roll back mock delivery** controls exercise the delivery safeguards.
@@ -46,11 +46,12 @@ npm install
 npm run dev
 ```
 
-Then open the URL printed by the development server and select **Run analysis**.
-It creates a persisted demo run using the sample source files. Uploading CSV or
-XLSX source files uses the same API pipeline; an optional JSON target schema is
-supported by the API (`POST /api/runs/upload`), and the built-in employee schema
-is used when one is not supplied from the UI.
+Then open the URL printed by the development server, select **Source data**, and
+upload one or more CSV/XLSX files before selecting **Run analysis**. The UI never
+substitutes seeded files on the first run. Uploaded source files use the same API
+pipeline; an optional JSON target schema is supported by the API
+(`POST /api/runs/upload`), and the built-in employee schema is used when one is
+not supplied from the UI.
 
 The API exposes `GET /health`, run retrieval, escalation resolution, controlled
 delivery, and explicit rollback endpoints. FastAPI also provides interactive API

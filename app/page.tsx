@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
-import { createDemoMigration, deliverMigration, resolveMigrationEscalation, rollbackMigration, uploadMigration } from '../lib/api';
+import { deliverMigration, resolveMigrationEscalation, rollbackMigration, uploadMigration } from '../lib/api';
 import type { ApiAuditEvent, ApiMapping, ApiRecord } from '../lib/api';
 
 type View = 'overview' | 'dataset' | 'mapping' | 'escalations' | 'delivery' | 'audit';
@@ -146,9 +146,14 @@ export default function Home() {
   }
 
   async function beginRun() {
+    if (!selectedFiles.length) {
+      setView('dataset');
+      setNotice('Add one or more CSV or XLSX source files before running analysis.');
+      return;
+    }
     setRunState('running');
     try {
-      const serverRun = selectedFiles.length ? await uploadMigration(selectedFiles) : await createDemoMigration();
+      const serverRun = await uploadMigration(selectedFiles);
       applyServerRun(serverRun);
       setRunState('complete');
       setNotice(`Server-side analysis completed for ${serverRun.metrics.source_records} records. Safe transformations were applied automatically.`);
